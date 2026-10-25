@@ -19,6 +19,7 @@ Use this skill whenever reading, creating, updating, linking, searching, or orga
 - **MCP API Return Fields:**
   - `create_record` returns `{ created: true, guid: "...", title: "...", collection_guid: "..." }`. The identifier field is **`.guid`** (never `.record_guid` or `.id`).
   - `create_line_item` returns `{ created: true, guid: "...", record_guid: "..." }`. The identifier field is **`.guid`** (never `.line_item_guid`).
+- **Prefer MCP Over Direct Disk Writes:** Thymer maintains an in-memory reactive database that syncs down to markdown files on disk. Editing `.md` files directly on disk bypasses this reactive engine, leading to stale UI panels, cached editor conflicts, or delayed sync. Always perform document and property writes via MCP tools (`insert_markdown`, `create_line_item`, `update_record_property`).
 
 ---
 
@@ -126,6 +127,12 @@ A line item's text is composed of an array of rich segments:
 >   { "type": "text", "text": " — Document Description" }
 > ]
 > ```
+
+### Hierarchical Block Insertion (Nesting & Ordering)
+When manipulating the block tree with `create_line_item`:
+- Pass `parent: parentGuid` to nest a line item underneath an existing heading, task, or list item. If omitted, the block attaches at the record root.
+- Pass `after: previousGuid` to control vertical ordering relative to sibling blocks.
+- To move an existing block, use `move_line_item({ workspace, line_item, parent, after })`.
 
 ---
 

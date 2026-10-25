@@ -259,9 +259,22 @@ cmd.exe /c "start /wait C:\Users\Jaap\AppData\Local\Programs\thymer\Thymer.exe -
 > When launched from background services, daemons, or CI workers, Electron may spawn into an isolated session without a visible window (`MainWindowHandle: 0`).
 > For local interactive development, launch the process visibly from an active user console or batch script (`start "" "Thymer.exe" --remote-debugging-port=9444`).
 
-### C. Account Picker Automation (`accounts.html`)
-On a cold start, Thymer may open a modal "Choose Account" screen (`accounts.html`). This blocks the renderer and MCP until the account is clicked.
-Automate clicking the account tile via CDP before attempting tool calls.
+### C. Account Picker Automation & Target Filtering
+When connecting via CDP (`http://127.0.0.1:9444/json`), the debugger discovers multiple targets (including `shared_worker`, `service_worker`, and `accounts.html`).
+Always filter for the main application window target:
+```javascript
+const targets = await (await fetch('http://127.0.0.1:9444/json')).json();
+
+// Check if blocked by account selection
+const accountsTarget = targets.find(t => t.type === 'page' && t.url.includes('accounts.html'));
+if (accountsTarget) {
+  // Automate clicking the account tile before continuing
+}
+
+// Target the active workspace window
+const appTarget = targets.find(t => t.type === 'page' && t.url.includes('thymer.com') && !t.url.includes('accounts.html'));
+if (!appTarget) throw new Error('Active Thymer workspace page target not found');
+```
 
 ### D. Window Resolution Protection (CRITICAL)
 > [!CAUTION]
