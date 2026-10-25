@@ -14,15 +14,18 @@ Use this skill whenever reading, creating, updating, linking, searching, or orga
 ## 1. Connection & Foundation
 
 - **MCP Endpoint:** Thymer Desktop exposes its MCP server locally at `http://127.0.0.1:13100/mcp` (HTTP POST with JSON-RPC 2.0).
-- **Workspace Scoping:** Always call `list_workspaces` first to identify the user's active/focused workspace. Always pass the explicit `workspace` GUID in all subsequent tool calls. Never assume or hardcode workspace GUIDs.
-- **Crockford Base32 GUIDs:** All native Thymer records, line items, and collections use 26-character Base32 GUIDs (`0-9`, `A-H`, `J-K`, `M-N`, `P-T`, `V-Z`, uppercase). Validate GUID formats before writing relations.
+- **Workspace Scoping:** Always call `list_workspaces` first to identify the user's active/focused workspace. Always pass the explicit `workspace` GUID in all subsequent tool calls. Never assume or hardcode workspace GUIDs across sessions.
+- **Crockford Base32 GUIDs:** All native Thymer records, line items, and collections use 26-character Base32 GUIDs (`0-9`, `A-H`, `J-K`, `M-N`, `P-T`, `V-Z`, uppercase). Validate GUID formats before creating relations.
+- **MCP API Return Fields:**
+  - `create_record` returns `{ created: true, guid: "...", title: "...", collection_guid: "..." }`. The identifier field is **`.guid`** (never `.record_guid` or `.id`).
+  - `create_line_item` returns `{ created: true, guid: "...", record_guid: "..." }`. The identifier field is **`.guid`** (never `.line_item_guid`).
 
 ---
 
 ## 2. Core Data Architecture
 
 Thymer's data model is fundamentally a **single tree of nested blocks (line items)**:
-```
+```text
 Workspace (Root)
  ├── Collections (Databases / Schemas / Views)
  │    └── Records (Pages / Documents / Notes)
@@ -40,7 +43,7 @@ Workspace (Root)
 
 ## 3. Working with Records & Properties
 
-### Structured vs. Raw Markdown Format (Critical)
+### A. Structured vs. Raw Markdown Format (Critical)
 `get_record` behaves differently depending on the `format` argument:
 - `get_record({ workspace, record })`: Returns a **raw Markdown string with YAML frontmatter**.
 - `get_record({ workspace, record, format: 'structured' })`: Returns a **JSON object**:
@@ -58,12 +61,16 @@ Workspace (Root)
   }
   ```
 
-### Reading Typed Property Tuples
-Property values in structured mode are formatted as typed tuples: `[type, value]`.
+### B. Reading Typed Property Tuples
+Property values in structured mode are returned as typed tuples: `[type, value]`.
 - Always unpack `val[1]` (e.g. `val[0] === 'number' ? Number(val[1]) : val[1]`). Direct arithmetic without unpacking will yield `NaN`.
 - Choice properties return internal choice IDs (e.g. `cDD41F10A87FC75`). Use `get_collection_schema` to inspect the available human-readable labels.
 
-### Updating Properties
+### C. Updating Properties vs. Note Text (The Structured Properties Rule)
+> [!IMPORTANT]
+> Thymer's database tables, Kanban views, filter bars, and dashboard widgets read **structured properties** from collections, not arbitrary text in note bodies.
+> When updating statuses, deadlines, contacts, or financial figures, always use MCP tools (`create_record(..., properties: { ... })` or `update_record_property(...)`). Writing prose into markdown notes does not populate database columns.
+
 When calling `update_record_property` or `create_record`:
 - For **choice** properties, pass either the plain text label (e.g. `"In Progress"`, `"Paid"`) or the choice ID. Labels are matched case-insensitively.
 - For **date** properties, pass standard ISO dates (e.g. `"2026-10-25"`).
@@ -89,7 +96,7 @@ A line item's text is composed of an array of rich segments:
 "segments": [
   { "type": "text", "text": "Review " },
   { "type": "ref", "text": "1XGA0X00XT61KFD862FC8KJJZ7" },
-  { "type": "text", "text": " before tomorrow " },
+  { "type": "text", "text": " before " },
   { "type": "datetime", "text": "tomorrow 10am" }
 ]
 ```
@@ -122,8 +129,9 @@ A line item's text is composed of an array of rich segments:
 
 ---
 
-## 5. Native Task Statuses
+## 5. Task Management & The 3-Step Waiting Task Pattern
 
+### Native Task Statuses (`set_task_status`)
 When updating tasks, use `set_task_status(workspace, lineItemGuid, status)`:
 
 | Status Code | Meaning | Behavior in UI |
@@ -137,6 +145,14 @@ When updating tasks, use `set_task_status(workspace, lineItemGuid, status)`:
 | `"alert"` | Urgent Warning | Warning badge |
 | `"starred"` | Starred / Focus | Star indicator |
 | `"canceled"` | Abandoned | Canceled marker |
+
+### The 3-Step Waiting Task Sequence
+When an agent writes a document that contains tasks waiting on external feedback or client delivery:
+1. Write the document body including the task markdown (`- [ ] Wait for client assets...`) via `insert_markdown`.
+2. Call `get_line_items(workspace, recordGuid)` to locate the newly parsed task line item `guid`.
+3. Call `set_task_status(workspace, lineGuid, "waiting")`.
+
+*(Note: Do not create disconnected line items before `insert_markdown`, as markdown insertion re-parses the note's block tree).*
 
 ---
 
@@ -161,7 +177,7 @@ The Journal is Thymer's date-indexed personal timeline.
     markdown: '## 🎯 Evening Wrap-up\n- [x] All sprint tasks shipped\n'
   });
   ```
-- **Navigate to Journal:**
+- **Navigate to Journal in Desktop UI:**
   ```javascript
   await call('navigate_to_journal', { workspace: WS, date: '2026-10-25' });
   ```
@@ -170,7 +186,7 @@ The Journal is Thymer's date-indexed personal timeline.
 
 ## 7. Panel & UI Navigation
 
-Agents can guide the user's attention in the desktop app:
+Agents can inspect and manipulate the user's desktop workspace:
 - `get_open_panels`: Inspect active panel indexes and currently loaded records.
 - `navigate_to_record`: Open a record in the active or specified panel.
 - `navigate_to_collection`: Navigate a panel to a specific collection view.
@@ -183,3 +199,4 @@ Agents can guide the user's attention in the desktop app:
 1. **Non-Destructive Operations:** Always inspect existing record line items or properties before writing. Never overwrite whole notes when appending notes or tasks.
 2. **Resolve Before Creating:** Always run `search` or `query_records` to check for existing records to prevent creating duplicates.
 3. **Link Everything:** In notes and deliverables, link related records using native `{ type: "ref", text: guid }` segments so the user has an interconnected knowledge graph.
+4. **Backlinks Discovery:** Use `get_backlinks` to identify what other pages or projects reference a specific record.

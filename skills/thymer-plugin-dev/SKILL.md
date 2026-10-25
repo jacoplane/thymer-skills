@@ -14,7 +14,7 @@ Use this skill whenever building, modifying, styling, debugging, or releasing a 
 ## 1. Plugin Architecture & Structure
 
 A standard Thymer plugin consists of:
-```
+```text
 my-thymer-plugin/
 ├── plugin.json              # Plugin manifest
 ├── package.json             # NPM metadata and scripts
@@ -59,7 +59,7 @@ my-thymer-plugin/
 > In JavaScript, `new Function(...)` strictly forbids ES module `export` and `import` declarations.
 > Any top-level `export const ...` or `export default ...` will throw a fatal runtime syntax error:
 > `SyntaxError: Unexpected token 'export'`
-> and prevent the plugin from loading completely.
+> and prevent the plugin from loading completely, stalling the MCP backend bridge.
 
 ### Hardening Your Build Pipeline (`build.mjs`)
 Always configure your bundler (e.g. `esbuild`) to output an IIFE and sanitize any lingering `export` keywords:
@@ -82,8 +82,9 @@ fs.writeFileSync('dist/plugin.js', js, 'utf8');
 
 ---
 
-## 3. Plugin SDK Surface & Lifecycle
+## 3. Plugin SDK Surface & Navigation Protocols
 
+### A. Core Lifecycle Methods
 Plugins hook into Thymer via standard lifecycle methods:
 
 ```javascript
@@ -120,9 +121,48 @@ class MyPlugin {
 }
 ```
 
+### B. Thymer Navigation Protocol (RootId Routing)
+> [!WARNING]
+> When navigating panels via the SDK, you must distinguish between records and collections:
+> - **Individual Records:** Use `{ type: 'edit_panel', rootId: recordGuid, workspaceGuid }`.
+> - **Collections / Databases:** Use `{ type: 'overview', rootId: collectionGuid, workspaceGuid }`.
+> 
+> Calling `edit_panel` on a collection GUID causes Thymer to crash the panel with `"Failed to load panel"`.
+
+To open side-by-side split panels without replacing the main dashboard:
+```javascript
+const sidePanel = await this.ui.createPanel({ afterPanel: sourcePanel });
+sidePanel.navigateTo({ type: 'overview', rootId: collectionGuid, workspaceGuid });
+```
+
 ---
 
-## 4. Instant Hot-Deploy via MCP
+## 4. Multi-Panel Responsive Design (Container Queries)
+
+In Thymer Desktop, users frequently split panels side by side. 
+- **Do NOT** use viewport-based `@media (max-width: ...)` queries for layout; the monitor width does not change when split panels open.
+- Use **CSS Container Queries** on your plugin root element:
+  ```css
+  .my-app-root {
+    container-type: inline-size;
+    container-name: myApp;
+  }
+
+  @container myApp (max-width: 1120px) {
+    /* Multi-panel split layout */
+    .dashboard-grid { grid-template-columns: 1fr; }
+  }
+
+  @container myApp (max-width: 720px) {
+    /* Narrow panel layout */
+    .action-rail { display: none; }
+  }
+  ```
+- **Breakout Width Rule:** Never apply `width: 100% !important` to `.panel`. Apply breakout widths exclusively to inner elements (`.panel-content`, `.editor`, `.panel-body`).
+
+---
+
+## 5. Instant Hot-Deploy via MCP
 
 Rather than manually zipping files and dragging them into the UI, deploy bundles directly to the active Thymer Desktop instance over MCP:
 
@@ -158,14 +198,22 @@ await call('update_plugin_json_config', {
 
 ---
 
-## 5. Electron Remote Debugging & Automated CDP Verification
+## 6. Electron Remote Debugging & Automated CDP Verification
 
 To allow AI agents to visually inspect, test, and take screenshots of plugins running inside Thymer Desktop:
 
-### 1. Launching Thymer in Debug Mode
+### A. The Single-Instance Lock Trap
+Electron applications enforce a single-instance lock (`app.requestSingleInstanceLock()`). If Thymer is already running in the background or system tray without the debugging flag, launching `Thymer.exe --remote-debugging-port=9444` will simply focus the existing instance and exit immediately without opening port 9444.
+
+**Always terminate existing instances before starting in debug mode:**
+```powershell
+taskkill /F /IM Thymer.exe /T 2>$null
+```
+
+### B. Launching Thymer in Debug Mode
 Thymer must be launched with the `--remote-debugging-port=9444` flag:
 ```powershell
-& "$env:LOCALAPPDATA\Programs\thymer\Thymer.exe" --remote-debugging-port=9444
+cmd.exe /c "start /wait C:\Users\Jaap\AppData\Local\Programs\thymer\Thymer.exe --remote-debugging-port=9444"
 ```
 
 > [!WARNING]
@@ -173,29 +221,31 @@ Thymer must be launched with the `--remote-debugging-port=9444` flag:
 > When launched from background services, daemons, or CI workers, Electron may spawn into an isolated session without a visible window (`MainWindowHandle: 0`).
 > For local interactive development, launch the process visibly from an active user console or batch script (`start "" "Thymer.exe" --remote-debugging-port=9444`).
 
-### 2. Chrome DevTools Protocol (CDP) Client
-Connect to `http://127.0.0.1:9444/json` to discover targets:
-```javascript
-const targets = await (await fetch('http://127.0.0.1:9444/json')).json();
-const appTarget = targets.find(t => t.type === 'page' && t.url.includes('thymer.com'));
-const ws = new WebSocket(appTarget.webSocketDebuggerUrl);
+### C. Account Picker Automation (`accounts.html`)
+On a cold start, Thymer may open a modal "Choose Account" screen (`accounts.html`). This blocks the renderer and MCP until the account is clicked.
+Automate clicking the account tile via CDP before attempting tool calls.
 
-// Send CDP evaluate command:
-ws.send(JSON.stringify({
-  id: 1,
-  method: 'Runtime.evaluate',
-  params: { expression: 'document.title' }
-}));
+### D. Window Resolution Protection (CRITICAL)
+> [!CAUTION]
+> Connecting Puppeteer or CDP to Electron without explicit configuration overrides the renderer with a default 800x600 viewport, shrinking the user's desktop application window.
+> 
+> **Mandatory Connection Pattern:**
+> 1. Always pass `defaultViewport: null`:
+>    ```javascript
+>    const browser = await puppeteer.connect({
+>      browserURL: 'http://127.0.0.1:9444',
+>      defaultViewport: null
+>    });
+>    ```
+> 2. Send `Emulation.clearDeviceMetricsOverride` immediately:
+>    ```javascript
+>    const p = (await browser.pages())[0];
+>    const client = await p.createCDPSession();
+>    await client.send('Emulation.clearDeviceMetricsOverride');
+>    ```
+> 3. **Never** call `page.setViewport()` with arbitrary dimensions.
 
-// Capture full screenshot:
-ws.send(JSON.stringify({
-  id: 2,
-  method: 'Page.captureScreenshot',
-  params: { format: 'png' }
-}));
-```
-
-### 3. Hot-Reloading the Desktop UI via CDP
+### E. Hot-Reloading the Desktop UI via CDP
 After pushing code updates via MCP, reload the renderer instantly:
 ```javascript
 await cdp.evaluate('window.location.reload()');
@@ -203,7 +253,7 @@ await cdp.evaluate('window.location.reload()');
 
 ---
 
-## 6. Self-Updating Pattern & Release Automation
+## 7. Self-Updating Pattern & Release Automation
 
 To distribute seamless updates to users:
 
