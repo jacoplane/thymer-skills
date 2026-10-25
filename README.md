@@ -45,10 +45,10 @@ Empowers your agent to:
 
 ---
 
-## 🛠️ Requirements
-- [Thymer Desktop](https://thymer.com/)
-- Local MCP Server enabled (`http://127.0.0.1:13100/mcp`)
-- Node.js 18+
+## 🛠️ Requirements & Platform Support
+- **Operating Systems:** Fully compatible with **macOS**, **Linux**, and **Windows**.
+- **Application:** [Thymer Desktop](https://thymer.com/) with Local MCP Server enabled (`http://127.0.0.1:13100/mcp`).
+- **Runtime:** Node.js 18+
 
 ---
 

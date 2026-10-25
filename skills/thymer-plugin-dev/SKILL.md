@@ -238,28 +238,77 @@ await call('update_plugin_json_config', {
 
 ## 7. Electron Remote Debugging & Automated CDP Verification
 
-To allow AI agents to visually inspect, test, and take screenshots of plugins running inside Thymer Desktop:
+To allow AI agents to visually inspect, test, and take screenshots of plugins running inside Thymer Desktop across **macOS**, **Linux**, and **Windows**:
 
 ### A. The Single-Instance Lock Trap
-Electron applications enforce a single-instance lock (`app.requestSingleInstanceLock()`). If Thymer is already running in the background or system tray without the debugging flag, launching `Thymer.exe --remote-debugging-port=9444` will simply focus the existing instance and exit immediately without opening port 9444.
+Electron applications enforce a single-instance lock (`app.requestSingleInstanceLock()`). If Thymer is already running in the background or system tray without the debugging flag, launching with `--remote-debugging-port=9444` will simply focus the existing instance and exit immediately without opening port 9444.
 
 **Always terminate existing instances before starting in debug mode:**
-```powershell
-taskkill /F /IM Thymer.exe /T 2>$null
-```
+- **macOS:** `pkill -f -i "Thymer" || true`
+- **Linux:** `pkill -f -i "thymer" || true`
+- **Windows:** `taskkill /F /IM Thymer.exe /T 2>$null`
 
-### B. Launching Thymer in Debug Mode
-Thymer must be launched with the `--remote-debugging-port=9444` flag:
-```powershell
-cmd.exe /c "start /wait C:\Users\Jaap\AppData\Local\Programs\thymer\Thymer.exe --remote-debugging-port=9444"
+### B. Launching Thymer in Debug Mode (Cross-Platform)
+
+- **macOS:**
+  ```bash
+  # Using the macOS open command:
+  open -a Thymer --args --remote-debugging-port=9444
+  
+  # Or executing the binary directly:
+  /Applications/Thymer.app/Contents/MacOS/Thymer --remote-debugging-port=9444 &
+  ```
+
+- **Linux:**
+  ```bash
+  thymer --remote-debugging-port=9444 &
+  ```
+
+- **Windows:**
+  ```powershell
+  Start-Process "$env:LOCALAPPDATA\Programs\thymer\Thymer.exe" -ArgumentList "--remote-debugging-port=9444"
+  # Or via CMD:
+  start "" "%LOCALAPPDATA%\Programs\thymer\Thymer.exe" --remote-debugging-port=9444
+  ```
+
+### C. Universal Node.js Debug Launcher (`launch-debug.mjs`)
+Drop this cross-platform helper script into your plugin repository for effortless one-command launches across all operating systems:
+```javascript
+import { execSync, spawn } from 'child_process';
+
+// 1. Terminate existing instances (releases single-instance lock)
+try {
+  if (process.platform === 'win32') {
+    execSync('taskkill /F /IM Thymer.exe /T 2>nul');
+  } else {
+    execSync('pkill -f -i thymer 2>/dev/null || true');
+  }
+} catch {}
+
+// 2. Launch with debug port
+const portArg = '--remote-debugging-port=9444';
+let child;
+
+if (process.platform === 'darwin') {
+  child = spawn('open', ['-a', 'Thymer', '--args', portArg], { detached: true, stdio: 'ignore' });
+} else if (process.platform === 'win32') {
+  const exe = `${process.env.LOCALAPPDATA}\\Programs\\thymer\\Thymer.exe`;
+  child = spawn(exe, [portArg], { detached: true, stdio: 'ignore' });
+} else {
+  child = spawn('thymer', [portArg], { detached: true, stdio: 'ignore' });
+}
+
+child.unref();
+console.log('✓ Thymer Desktop launched with remote debugging on port 9444');
 ```
 
 > [!WARNING]
-> **Windows Session Isolation Guardrail:**
-> When launched from background services, daemons, or CI workers, Electron may spawn into an isolated session without a visible window (`MainWindowHandle: 0`).
-> For local interactive development, launch the process visibly from an active user console or batch script (`start "" "Thymer.exe" --remote-debugging-port=9444`).
+> **GUI Session Guardrails:**
+> - **macOS:** Must run inside an interactive login session with access to WindowServer. Background daemons without GUI access cannot display windows.
+> - **Linux:** Requires `$DISPLAY` (e.g. `:0`) or `$WAYLAND_DISPLAY` set in the environment. For headless CI environments, run under `xvfb-run`.
+> - **Windows:** Do not launch from non-interactive background services or daemon tasks (Session 0 isolation), which creates headless background processes with `MainWindowHandle: 0`.
 
-### C. Account Picker Automation & Target Filtering
+### D. Account Picker Automation & Target Filtering
 When connecting via CDP (`http://127.0.0.1:9444/json`), the debugger discovers multiple targets (including `shared_worker`, `service_worker`, and `accounts.html`).
 Always filter for the main application window target:
 ```javascript
@@ -276,7 +325,7 @@ const appTarget = targets.find(t => t.type === 'page' && t.url.includes('thymer.
 if (!appTarget) throw new Error('Active Thymer workspace page target not found');
 ```
 
-### D. Window Resolution Protection (CRITICAL)
+### E. Window Resolution Protection (CRITICAL)
 > [!CAUTION]
 > Connecting Puppeteer or CDP to Electron without explicit configuration overrides the renderer with a default 800x600 viewport, shrinking the user's desktop application window.
 > 
@@ -296,7 +345,7 @@ if (!appTarget) throw new Error('Active Thymer workspace page target not found')
 >    ```
 > 3. **Never** call `page.setViewport()` with arbitrary dimensions.
 
-### E. Hot-Reloading the Desktop UI via CDP
+### F. Hot-Reloading the Desktop UI via CDP
 After pushing code updates via MCP, reload the renderer instantly:
 ```javascript
 await cdp.evaluate('window.location.reload()');
