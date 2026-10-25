@@ -48,7 +48,45 @@ my-thymer-plugin/
 
 ---
 
-## 2. The Runtime Environment & The Dynamic Eval Trap
+## 2. The 6-Step Autonomous Development Loop
+
+Agents developing or maintaining Thymer plugins must follow this strict, closed-loop execution cycle. Never stop after modifying source files; always build, deploy, reload, and visually verify:
+
+```text
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 1. Inspect Current State via CDP (:9444)                    │
+  │    Capture screenshot, evaluate DOM, inspect error console  │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 2. Modify Source Code (src/index.js & src/styles.css)        │
+  │    Implement feature, patch bug, or adjust CSS layout       │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 3. Build Plugin Bundle (node build.mjs)                     │
+  │    Compile with esbuild, strip 'export' keywords for eval   │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 4. Hot-Deploy Live via MCP (Port 13100)                     │
+  │    Push dist/plugin.js & dist/plugin.css to target workspace │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 5. Trigger Live Reload via CDP                              │
+  │    Execute window.location.reload() in Electron renderer    │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 6. Visually Verify Layout & Health                          │
+  │    Take fresh CDP screenshot, confirm zero console errors   │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. The Runtime Environment & The Dynamic Eval Trap
 
 > [!CAUTION]
 > **Dynamic Evaluator Rule (`new Function`):**
@@ -82,7 +120,7 @@ fs.writeFileSync('dist/plugin.js', js, 'utf8');
 
 ---
 
-## 3. Plugin SDK Surface & Navigation Protocols
+## 4. Plugin SDK Surface & Navigation Protocols
 
 ### A. Core Lifecycle Methods
 Plugins hook into Thymer via standard lifecycle methods:
@@ -137,7 +175,7 @@ sidePanel.navigateTo({ type: 'overview', rootId: collectionGuid, workspaceGuid }
 
 ---
 
-## 4. Multi-Panel Responsive Design (Container Queries)
+## 5. Multi-Panel Responsive Design (Container Queries)
 
 In Thymer Desktop, users frequently split panels side by side. 
 - **Do NOT** use viewport-based `@media (max-width: ...)` queries for layout; the monitor width does not change when split panels open.
@@ -162,7 +200,7 @@ In Thymer Desktop, users frequently split panels side by side.
 
 ---
 
-## 5. Instant Hot-Deploy via MCP
+## 6. Instant Hot-Deploy via MCP
 
 Rather than manually zipping files and dragging them into the UI, deploy bundles directly to the active Thymer Desktop instance over MCP:
 
@@ -198,7 +236,7 @@ await call('update_plugin_json_config', {
 
 ---
 
-## 6. Electron Remote Debugging & Automated CDP Verification
+## 7. Electron Remote Debugging & Automated CDP Verification
 
 To allow AI agents to visually inspect, test, and take screenshots of plugins running inside Thymer Desktop:
 
@@ -253,7 +291,7 @@ await cdp.evaluate('window.location.reload()');
 
 ---
 
-## 7. Self-Updating Pattern & Release Automation
+## 8. Self-Updating Pattern & Release Automation
 
 To distribute seamless updates to users:
 
